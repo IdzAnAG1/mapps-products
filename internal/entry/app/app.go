@@ -10,6 +10,7 @@ import (
 	productsv1 "mapps_product/generated/mobileapps/proto/products/v1"
 	"mapps_product/internal/config"
 	"mapps_product/internal/db"
+	db_gen "mapps_product/internal/db/gen"
 	"mapps_product/internal/interruptor"
 	logger "mapps_product/internal/logger"
 	"mapps_product/internal/server"
@@ -70,8 +71,8 @@ func (app *App) Run() error {
 	iter.Run()
 
 	productServer := &server.GrpcProductServer{
-		Logger: app.logger,
-		DB:     app.db,
+		Logger:  app.logger,
+		Queries: db_gen.New(app.db.Pool),
 	}
 	productsv1.RegisterProductsServer(srv, productServer)
 	app.logger.Info("product gRPC server registered")
