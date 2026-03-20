@@ -1,0 +1,39 @@
+name: CD
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+jobs:
+  deployment:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: self-hosted
+    steps:
+      - name: Docker login
+        run: |
+          echo ${{ secrets.DOCKER_AT }} | docker login -u ${{ secrets.DOCKER_LOGIN }} --password-stdin
+
+      - name: Prepare deploy directory
+        run: mkdir -p $HOME/mapps/product_service
+
+      - name: Create env file
+        run: echo "${{ secrets.ENV }}" > $HOME/mapps/product_service/mapps_product_service.env
+
+      - name: Download docker-compose.yml
+        run: curl -o $HOME/mapps/product_service/docker-compose.yml https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/main/docker-compose.yaml
+
+      - name: Drop oldest container
+        run: docker compose --project-name mapps-product-service --env-file $HOME/mapps/product_service/mapps_product_service.env -f $HOME/mapps/product_service/docker-compose.yml down
+
+      - name: Fetch new image
+        run: docker compose --project-name mapps-product-service --env-file $HOME/mapps/product_service/mapps_product_service.env -f $HOME/mapps/product_service/docker-compose.yml pull
+
+      - name: Up postgres container
+        run: docker compose --project-name mapps-product-service --env-file $HOME/mapps/product_service/mapps_product_service.env -f $HOME/mapps/product_service/docker-compose.yml up -d postgres
+
+      - name: Up migrator container
+        run: docker compose --project-name mapps-product-service --env-file $HOME/mapps/product_service/mapps_product_service.env -f $HOME/mapps/product_service/docker-compose.yml up migrator
+
+      - name: Up app container
+        run: docker compose --project-name mapps-product-service --env-file $HOME/mapps/product_service/mapps_product_service.env -f $HOME/mapps/product_service/docker-compose.yml up -d app

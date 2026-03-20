@@ -1,0 +1,129 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  # Проверка go-кода на написание стилистических и ошибок при компиляции
+  golangci:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.10
+
+  # Проверка работы сервиса внутренними тестами
+  gotest:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: test
+        run: go test -v ./...
+
+  # Проверка изменения миграций (Если изменений нет, то и запускать мигратора на проверку валидности SQL не имеет смысла)
+  migrations_check:
+    outputs:
+      is_changed: ${{ steps.write_result.outputs.is_changed }}
+    needs: [golangci, gotest]
+    name: check migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: '2'
+
+      - id: write_result
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -q 'internal/db/migrations'; then
+            echo "is_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Запуск проверки миграций на тестовой БД
+  migrations:
+    if: needs.migrations_check.outputs.is_changed == 'true'
+    needs: [migrations_check]
+    name: preparing migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options:
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: install goose
+        run: go install github.com/pressly/goose/v3/cmd/goose@latest
+
+      - name: validate migrations
+        run: goose -dir=./internal/db/migrations validate
+
+      - name: migrate fix -> optimize labels
+        run: goose -dir=./internal/db/migrations fix
+
+      - name: test migration
+        run: goose -dir=./internal/db/migrations up
+        env:
+          GOOSE_DRIVER: postgres
+          GOOSE_DBSTRING: ${{ secrets.DB_STRING_TEST }}
+
+      - name: build migrator container
+        run: docker build -t ${{ secrets.DOCKER_LOGIN }}/mappsproduct-migrator:latest . -f ./internal/db/Dockerfile
+
+      - name: docker login
+        run: echo ${{ secrets.DOCKER_AT }} | docker login -u ${{ secrets.DOCKER_LOGIN }} --password-stdin
+
+      - name: docker push
+        run: docker push ${{ secrets.DOCKER_LOGIN }}/mappsproduct-migrator:latest
+
+  # Сборка проекта в докер контейнер
+  build:
+    if: always() && (needs.migrations.result == 'success' || needs.migrations.result == 'skipped')
+    needs: [migrations]
+    name: building the binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: docker build
+        run: docker build -t ${{ secrets.DOCKER_LOGIN }}/mappsproduct:latest .
+
+      - name: docker login
+        run: echo ${{ secrets.DOCKER_AT }} | docker login -u ${{ secrets.DOCKER_LOGIN }} --password-stdin
+
+      - name: docker push
+        run: docker push ${{ secrets.DOCKER_LOGIN }}/mappsproduct:latest

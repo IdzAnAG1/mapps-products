@@ -1,0 +1,44 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_product_mapps_container
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${PRODUCT_DATABASE_USER}
+      POSTGRES_PASSWORD: ${PRODUCT_DATABASE_PASSWORD}
+      POSTGRES_DB: ${PRODUCT_DATABASE_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_mapps_product_data:/var/lib/postgresql/data
+
+  migrator:
+    image: ${DOCKER_LOGIN}/mappsproduct-migrator:latest
+    container_name: mapps-product-migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOOSE_DRIVER: "postgres"
+      GOOSE_DBSTRING: "user=${PRODUCT_DATABASE_USER} password=${PRODUCT_DATABASE_PASSWORD} host=postgres dbname=${PRODUCT_DATABASE_NAME} sslmode=disable"
+
+  app:
+    image: ${DOCKER_LOGIN}/mappsproduct:latest
+    container_name: mapps-product
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    env_file:
+      - ./mapps_product_service.env
+    environment:
+      PRODUCT_DATABASE_HOST: postgres
+    ports:
+      - "${EXTERNAL_PORT}:${APP_CONTAINER_PORT}"
+
+volumes:
+  postgres_mapps_product_data:
