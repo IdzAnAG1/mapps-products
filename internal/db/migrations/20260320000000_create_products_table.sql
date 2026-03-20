@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_category ON products (category);
-CREATE INDEX IF NOT EXISTS idx_products_name     ON products USING gin (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_products_name ON products (name);
 
 -- +goose Down
 DROP TABLE IF EXISTS products;
