@@ -1,3 +1,4 @@
+-- +goose Up
 CREATE TABLE IF NOT EXISTS products (
     id               TEXT PRIMARY KEY,
     name             TEXT        NOT NULL,
@@ -12,3 +13,6 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE INDEX IF NOT EXISTS idx_products_category ON products (category);
 CREATE INDEX IF NOT EXISTS idx_products_name     ON products USING gin (name gin_trgm_ops);
+
+-- +goose Down
+DROP TABLE IF EXISTS products;
